@@ -5,19 +5,63 @@ from collections import Counter
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.errors import bad_request, not_found, unprocessable
 from app.csv_service import parse_csv_content
 from app.database import get_db
+from app.deps import Page, PageSize, pagination_offset
 from app.models import Upload, User
-from app.schemas import RowError, UploadResponse, UploadStatus, UploadStatusResponse
+from app.schemas import (
+    Paginated,
+    RowError,
+    UploadResponse,
+    UploadStatus,
+    UploadStatusResponse,
+)
 from app.tasks import generate_campaigns_for_upload
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/uploads", response_model=Paginated[UploadStatusResponse])
+def list_uploads(
+    db: Session = Depends(get_db),
+    page: Page = 1,
+    page_size: PageSize = 100,
+):
+    total = db.execute(select(func.count()).select_from(Upload)).scalar() or 0
+    offset, limit = pagination_offset(page, page_size)
+    rows = (
+        db.execute(
+            select(Upload)
+            .order_by(Upload.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    data = [
+        UploadStatusResponse(
+            id=u.id,
+            filename=u.filename,
+            status=UploadStatus(u.status),
+            total_rows=u.total_rows,
+            valid_rows=u.valid_rows,
+            invalid_rows=u.invalid_rows,
+            created_at=u.created_at,
+            processed_at=u.processed_at,
+        )
+        for u in rows
+    ]
+    return Paginated[UploadStatusResponse](
+        data=data, page=page, page_size=page_size, total=total
+    )
 
 
 @router.post("/upload", status_code=201, response_model=UploadResponse)

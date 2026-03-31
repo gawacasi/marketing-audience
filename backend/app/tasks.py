@@ -30,6 +30,11 @@ def run_campaign_generation(upload_id: str) -> dict[str, int]:
     db = SessionLocal()
     try:
         up = db.get(Upload, upload_id)
+        if up is None:
+            return {}
+        name_to_id = ensure_campaigns(db)
+        users = list(db.execute(select(User).where(User.upload_id == upload_id)).scalars().all())
+        user_ids = [u.id for u in users]
         if user_ids:
             db.execute(delete(CampaignUser).where(CampaignUser.user_id.in_(user_ids)))
         counts: dict[str, int] = {n: 0 for n in ALL_CAMPAIGNS}
